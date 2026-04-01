@@ -1,0 +1,79 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===== USERS =====
+    // Chaque utilisateur peut lire/écrire son propre profil
+    // Les utilisateurs connectés peuvent lire les profils des autres (pour messagerie)
+    match /users/{userId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // ===== CLASSES =====
+    // Lecture : tous les utilisateurs connectés
+    // Écriture : directrice seulement (vérifiée via profil Firestore)
+    match /classes/{classId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null && isDirectrice();
+    }
+
+    // ===== CHILDREN =====
+    // Lecture : parent de l'enfant, enseignant de la classe, directrice
+    // Écriture : directrice ou parent propriétaire
+    match /children/{childId} {
+      allow read: if request.auth != null && (
+        resource.data.parentId == request.auth.uid ||
+        isDirectrice() ||
+        isEnseignant()
+      );
+      allow create: if request.auth != null;
+      allow update, delete: if request.auth != null && (
+        resource.data.parentId == request.auth.uid || isDirectrice()
+      );
+    }
+
+    // ===== EVENTS =====
+    // Lecture : tous les utilisateurs connectés
+    // Écriture : directrice ou enseignant
+    match /events/{eventId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null && (isDirectrice() || isEnseignant());
+    }
+
+    // ===== ANNOUNCEMENTS =====
+    // Lecture : tous les utilisateurs connectés
+    // Écriture : directrice ou enseignant
+    match /announcements/{annId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null && (isDirectrice() || isEnseignant());
+    }
+
+    // ===== CONVERSATIONS =====
+    // Lecture/écriture : participants seulement
+    match /conversations/{convId} {
+      allow read, write: if request.auth != null &&
+        request.auth.uid in resource.data.participants;
+      allow create: if request.auth != null;
+
+      // Messages dans une conversation
+      match /messages/{messageId} {
+        allow read: if request.auth != null && isParticipant(convId);
+        allow create: if request.auth != null && isParticipant(convId);
+      }
+    }
+
+    // ===== HELPER FUNCTIONS =====
+    function isDirectrice() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'directrice';
+    }
+
+    function isEnseignant() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'enseignant';
+    }
+
+    function isParticipant(convId) {
+      return request.auth.uid in get(/databases/$(database)/documents/conversations/$(convId)).data.participants;
+    }
+  }
+}
